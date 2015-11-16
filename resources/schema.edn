@@ -1,0 +1,141 @@
+;; this file is transacted into Datomic in several passes,
+;; especially the attributes with :attribute/validators cannot
+;; be added at the same time as the attribute itself!
+
+;; there's however great value in keeping the configuration attributes
+;; and their validators in the same place - this schema.
+
+{:db/id #db/id [:db.part/db]
+ :db/ident :attribute/validators
+ :db/valueType :db.type/ref
+ :db/doc "refs to db functions to validating
+datoms given their attribute"
+ :db/cardinality :db.cardinality/many
+ :db.install/_attribute :db.part/db}
+
+{:db/id #db/id [:db.part/db]
+ :db/ident :user/firstname
+ :db/valueType :db.type/string
+ :db/cardinality :db.cardinality/one
+ :db.install/_attribute :db.part/db
+ :attribute/validators [:validator/not-too-long
+                        :validator/not-empty-string]}
+
+{:db/id #db/id [:db.part/db]
+ :db/ident :user/lastname
+ :db/valueType :db.type/string
+ :db/cardinality :db.cardinality/one
+ :db.install/_attribute :db.part/db
+ :attribute/validators [:validator/not-too-long
+                        :validator/not-empty-string]}
+
+{:db/id #db/id [:db.part/db]
+ :db/ident :user/email
+ :db/valueType :db.type/string
+ :db/cardinality :db.cardinality/one
+ :db.install/_attribute :db.part/db
+ :attribute/validators [:validator/not-too-long :validator/email]}
+
+{:db/id #db/id [:db.part/db]
+ :db/ident :user/ssn
+ :db/valueType :db.type/string
+ :db/cardinality :db.cardinality/one
+ :db.install/_attribute :db.part/db
+ :attribute/validators [:validator/not-too-long :validator/ssn]}
+
+{:db/id #db/id [:db.part/db]
+ :db/ident :user/birthday
+ :db/valueType :db.type/instant
+ :db/cardinality :db.cardinality/one
+ :db.install/_attribute :db.part/db
+ :attribute/validators [:validator/not-too-long :validator/ssn]}
+
+{:db/id #db/id [:db.part/user]
+ :db/ident :validator/not-too-long
+ :db/fn #db/fn
+ {:lang "clojure"
+  :params [datom]
+  :code
+  (let [v (nth datom 2)]
+    (when
+        (> (count v) 100)
+      {:msg (str "string beginning with "
+                 (.substring v 0 20)
+                 " too long "
+                 (count v))
+       :fn :validator/not-too-long
+       :len (count v)
+       :beginning (.substring v 0 20)}))}}
+
+{:db/id #db/id [:db.part/user]
+ :db/ident :validator/not-empty-string
+ :db/fn #db/fn
+ {:lang "clojure"
+  :params [datom]
+  :code (let [v (nth datom 2)]
+          (when
+              (empty? v)
+            {:msg (str "string cannot be empty")
+             :fn :validator/not-empty-string
+             :error :cannot-be-empty}))}}
+
+{:db/id #db/id [:db.part/user]
+ :db/ident :validator/ssn
+ :db/fn #db/fn
+ {:lang "clojure"
+  :params [datom]
+  :code 
+  (when-not (= 10 (count (nth datom 2)))
+    {:msg (str "ssn must contain 10 digits")
+     :fn :validator/not-empty-string
+     :error :cannot-be-empty})}}
+
+{:db/id #db/id [:db.part/user]
+ :db/ident :validator/email
+ :db/fn #db/fn
+ {:lang "clojure"
+  :params [datom]
+  :code (let [v (nth datom 2)]
+          (when-not
+           (.contains v "@")
+            {:msg (str "email must contain @")
+             :fn :validator/email
+             :error :validator/not-to-long}))}}
+
+{:db/id #db/id [:db.part/user]
+ :db/doc "given that people haven't been born"
+ :db/ident :validator/reasonable-birthday
+ :db/fn #db/fn
+ {:lang "clojure"
+  :params [datom]
+  :code (let [v (nth datom 2)]
+          (when
+              (or (.before v #inst "1890-01-01")
+                  (.after v (java.util.Date.)))
+            {:msg (str "People cannot be born before 1890 and not after (now)")
+             :fn :validator/reasonable-birthday
+             :date (prn-str v)
+             :time-in-millis (.getTime v)}))}}
+
+{:db/id #db/id [:db.part/user]
+ :db/ident :validate
+ :db/doc "This database functions expects that the validatom.core namespace is availiable on transactor.
+Use mem, add jar to transactor or convert validatom.core/validate-tx-data to a database function."
+ :db/fn #db/fn
+ {:lang "clojure"
+  :require [validatom core]
+  :params [db data-to-transact]
+  :code (let [{datoms :tx-data
+               db :db-after} (d/with db data-to-transact)
+              validation-result (validatom.core/validate-tx-data db datoms)]
+          (if (every? true? (map :correct? validation-result))
+            ;; return the tx-data  "signed of"
+            (concat data-to-transact [[:db/add (d/tempid :db.part/tx) :db/doc "validation ok!"]])
+            ;; we found constraint breaking, cancel transaction
+            (let [incorrect-datoms (remove :correct? validation-result)]
+              (throw
+               (ex-info
+                (str (count incorrect-datoms) " found in tx-data by :validate")
+                {:incorrect-datoms incorrect-datoms
+                 :db/fn :validate
+                 :data-to-transact data-to-transact})))))}}
