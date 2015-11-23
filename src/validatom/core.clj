@@ -11,16 +11,15 @@ informative exception or returns true"
   [db datom]
   (let [a (nth datom 1)
         v (nth datom 2)]
-    (when-not (entity db a)
+    (if-let [ent (entity db a)]
+      ent
       (throw
        (ex-info
         (str "attribute " a " does not exist!")
         {:a a
          :v v
          :datom datom
-         :error :attribute-does-not-exist}))))
-  ;; to satisfy :pre
-  true)
+         :error :attribute-does-not-exist})))))
 
 (defn validate-datom
   "returns a map with

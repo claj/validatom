@@ -13,22 +13,11 @@
       io/reader
       Util/readAll))
 
-(def allowed-bare-schema-attributes
-  [:db/id
-   :db/ident
-   :db/valueType
-   :db/doc
-   :db/cardinality
-   :db.install/_attribute
-   :db/isComponent
-   :db/fulltext
-   :db/unique
-   :db/index])
-
 (defn bare-schema-entities
-  "every entity that is transactable on an empty db"
+  "all the keys beginning with db and having the install-attribute set.
+supposedly transactable schema on empty db"
   [resource]
-  (map #(select-keys % allowed-bare-schema-attributes)
+  (map #(into {} (filter (fn [[k v]] (when-let [ns-str (namespace k)] (.startsWith ns-str "db"))) %))
        (filter :db.install/_attribute resource)))
 
 (defn validator?
